@@ -1,4 +1,4 @@
-/* * Data converted from C:/Users/erick/OneDrive/Documents/PlatformIO/Projects/ESP32_Test/build/esp-idf/mbedtls/x509_crt_bundle
+/* * Data converted from C:/Users/erick/Documents/PlatformIO/Projects/ESP32_Test/build/esp-idf/mbedtls/x509_crt_bundle
  */
 .data
 #if !defined (__APPLE__) && !defined (__linux__)

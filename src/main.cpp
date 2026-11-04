@@ -1,107 +1,99 @@
-#include <algorithm>
-#include <cstdio>
-#include <map>
-#include <string>
-#include <vector>
-
-#include "dl_model_base.hpp"
+#include "dl_model_base.hpp" // Required for dl::Model
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "nvs_flash.h"
+#include "yolo26.hpp" // Use the Official Component
+#include <stdio.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_timer.h"
 
-extern const uint8_t model_espdl[] asm("_binary_yolov5_espdl_start");
+static const char *TAG = "yolo26_detect";
 
-static const char *TAG = "yolov5";
+// =========================================================================
+// 🛠️ CLASS LABELS (Auto-selected by CMake based on MODEL_FILENAME)
+// =========================================================================
 
-// Prints a per-op-type table (calls, total time, %, average) plus the slowest layers.
-static void print_op_summary(dl::Model *model, const char *label, size_t top_layers = 0)
+#include "coco_classes.hpp"
+const char **current_classes = coco_classes;
+// =========================================================================
+
+// --- Model Embedding ---
+// The symbol name is generated AUTOMATICALLY by CMakeLists.txt.
+// It is injected here as "MODEL_SYMBOL_STR".
+extern const uint8_t model_binary_start[] asm("_binary_yolo26n_512_s8_s3_espdl_start");
+
+// --- Image Embedding ---
+extern const uint8_t person_jpg_start[] asm("_binary_person_jpg_start");
+extern const uint8_t person_jpg_end[] asm("_binary_person_jpg_end");
+extern const uint8_t person2_jpg_start[] asm("_binary_person2_jpg_start");
+extern const uint8_t person2_jpg_end[] asm("_binary_person2_jpg_end");
+
+void test_inference(dl::Model *model, YOLO26 &processor, const uint8_t *jpg_data, size_t jpg_len, const char *name)
 {
-    auto info = model->get_module_info();
+    ESP_LOGI("image:", "%s", name);
 
-    struct OpStat {
-        std::string type;
-        int calls = 0;
-        uint64_t us = 0;
-    };
-    std::map<std::string, OpStat> by_type;
-    struct Layer {
-        std::string name, type;
-        uint32_t us;
-    };
-    std::vector<Layer> layers;
-    uint64_t total_us = 0;
+    // 1. Decode JPEG
+    auto img = processor.decode_jpeg(jpg_data, jpg_len);
 
-    for (const auto &kv : info) {
-        if (kv.first == "total") continue;
-        OpStat &s = by_type[kv.second.type];
-        s.type = kv.second.type;
-        s.calls++;
-        s.us += kv.second.latency;
-        total_us += kv.second.latency;
-        Layer layer;
-        layer.name = kv.first;
-        layer.type = kv.second.type;
-        layer.us = kv.second.latency;
-        layers.push_back(layer);
+    // 2. Preprocess (Measure Time)
+    // Automatically does letterboxing and fills model inputs natively
+    int64_t start_pre = esp_timer_get_time();
+    processor.preprocess(img);
+    int64_t end_pre = esp_timer_get_time();
+
+    // 3. Inference (Measure Time)
+    int64_t start_inf = esp_timer_get_time();
+    model->run();
+    int64_t end_inf = esp_timer_get_time();
+
+    // 4. Post-Process (Measure Time)
+    int64_t start_post = esp_timer_get_time();
+    auto results = processor.postprocess(model->get_outputs());
+    int64_t end_post = esp_timer_get_time();
+
+    // Calculate Latencies (µs → ms)
+    uint32_t lat_pre = (uint32_t)((end_pre - start_pre) / 1000);
+    uint32_t lat_inf = (uint32_t)((end_inf - start_inf) / 1000);
+    uint32_t lat_post = (uint32_t)((end_post - start_post) / 1000);
+
+    ESP_LOGI(TAG, "Pre: %lu ms | Inf: %lu ms | Post: %lu ms", lat_pre, lat_inf, lat_post);
+
+    for (const auto &res : results) {
+        // The processor automatically maps class_id to the string array you passed
+        ESP_LOGI("YOLO26",
+                 "[category: %s, score: %.2f, x1: %d, y1: %d, x2: %d, y2: %d]",
+                 current_classes[res.category],
+                 res.score,
+                 res.box[0],
+                 res.box[1],
+                 res.box[2],
+                 res.box[3]);
     }
 
-    std::vector<OpStat> rows;
-    for (auto &kv : by_type) rows.push_back(kv.second);
-    std::sort(rows.begin(), rows.end(), [](const OpStat &a, const OpStat &b) { return a.us > b.us; });
-
-    printf("\n%s per-op timing | Summed ops: %llu us (%.2f ms)\n",
-           label, (unsigned long long)total_us, total_us / 1000.0);
-    printf("--- Per-op profile (us, one invoke) ---\n");
-    for (const auto &r : rows) {
-        printf("%-24s %3d calls %10llu us\n", r.type.c_str(), r.calls, (unsigned long long)r.us);
-    }
-    if (top_layers == 0) {
-        printf("\n");
-        return;
-    }
-
-    std::sort(layers.begin(), layers.end(), [](const Layer &a, const Layer &b) { return a.us > b.us; });
-    printf("\n--- Slowest %u layers ---\n", (unsigned)std::min(top_layers, layers.size()));
-    for (size_t i = 0; i < std::min(top_layers, layers.size()); i++) {
-        printf("%10u us %5.1f%%  %-16s %s\n", (unsigned)layers[i].us,
-               total_us ? 100.0 * layers[i].us / total_us : 0.0,
-               layers[i].type.c_str(), layers[i].name.c_str());
-    }
-    printf("\n");
-}
-
-// Whole-invoke latency for a given runtime mode (average of n runs after one warm-up).
-static void time_invoke(dl::Model *model, dl::runtime_mode_t mode, const char *label, int n = 3)
-{
-    model->run(mode);  // warm-up
-    int64_t t0 = esp_timer_get_time();
-    for (int i = 0; i < n; i++) model->run(mode);
-    int64_t us = (esp_timer_get_time() - t0) / n;
-    printf("%-14s Invoke: %lld us (%.2f ms)\n", label, (long long)us, us / 1000.0);
+    heap_caps_free(img.data);
 }
 
 extern "C" void app_main(void)
 {
-    ESP_LOGI(TAG, "Application started; loading YOLOv5 model from flash");
+    ESP_LOGI(TAG, "YOLO26 Firmware Example");
 
-    // Keep parameter in FLASH, saves PSRAM/internal RAM, lower performance.
-    dl::Model *model = new dl::Model((const char *)model_espdl,
+    // 1. Load Model (Using the Magic Symbol from CMake)
+    ESP_LOGI(TAG, "Loading Model from Flash...");
+    dl::Model *model = new dl::Model((const char *)model_binary_start,
                                      fbs::MODEL_LOCATION_IN_FLASH_RODATA,
                                      0,
                                      dl::MEMORY_MANAGER_GREEDY,
                                      nullptr,
                                      true);
 
-    ESP_LOGI(TAG, "Model loaded; running embedded inference test");
-    ESP_ERROR_CHECK(model->test());
-    ESP_LOGI(TAG, "Embedded inference test passed");
+    // 2. Initialize Processor
+    YOLO26 processor(model, YOLO_TARGET_K, YOLO_CONF_THRESH, current_classes);
 
-    model->profile_memory(); 
-    printf("\n");
-    time_invoke(model, dl::RUNTIME_MODE_SINGLE_CORE, "Core: 1");
-    time_invoke(model, dl::RUNTIME_MODE_MULTI_CORE, "Core: 2");
-    print_op_summary(model, "Cores: 1");
+    // 3. Run Tests
+    test_inference(model, processor, person_jpg_start, (size_t)(person_jpg_end - person_jpg_start), "person.jpg");
+    test_inference(model, processor, person2_jpg_start, (size_t)(person2_jpg_end - person2_jpg_start), "person2.jpg");
+
 
     delete model;
 }

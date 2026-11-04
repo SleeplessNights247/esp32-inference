@@ -1,0 +1,12 @@
+.section .rodata.embedded,"a"
+.balign 16
+.global yolo26n_512_s8_s3_espdl
+yolo26n_512_s8_s3_espdl:
+.global _binary_yolo26n_512_s8_s3_espdl_start
+_binary_yolo26n_512_s8_s3_espdl_start:
+.incbin "C:/Users/erick/Documents/PlatformIO/Projects/ESP32_Test/models/yolo26n_512_s8_s3.espdl"
+.global _binary_yolo26n_512_s8_s3_espdl_end
+_binary_yolo26n_512_s8_s3_espdl_end:
+.global _binary_yolo26n_512_s8_s3_espdl_length
+_binary_yolo26n_512_s8_s3_espdl_length:
+.long _binary_yolo26n_512_s8_s3_espdl_end - _binary_yolo26n_512_s8_s3_espdl_start

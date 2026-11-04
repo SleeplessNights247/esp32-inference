@@ -1,5 +1,4 @@
-"-specs=C:/Users/erick/OneDrive/Documents/PlatformIO/Projects/ESP32_Test/build/bootloader/specs/picolibc.specs"
--Wno-frame-address
+"-specs=C:/Users/erick/Documents/PlatformIO/Projects/ESP32_Test/build/bootloader/specs/picolibc.specs"
 -mlongcalls
 -fno-builtin-memcpy
 -fno-builtin-memset
