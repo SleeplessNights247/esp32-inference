@@ -1,5 +1,6 @@
 #include "dl_model_base.hpp" // Required for dl::Model
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
 #include "yolo26.hpp" // Use the Official Component
@@ -19,8 +20,6 @@ const char **current_classes = coco_classes;
 // =========================================================================
 
 // --- Model Embedding ---
-// The symbol name is generated AUTOMATICALLY by CMakeLists.txt.
-// It is injected here as "MODEL_SYMBOL_STR".
 extern const uint8_t model_binary_start[] asm("_binary_yolo26n_512_s8_s3_espdl_start");
 
 // --- Image Embedding ---
@@ -44,6 +43,9 @@ void test_inference(dl::Model *model, YOLO26 &processor, const uint8_t *jpg_data
 
     // 3. Inference (Measure Time)
     int64_t start_inf = esp_timer_get_time();
+    // Measured on this board: MULTI_CORE 5229 ms vs SINGLE_CORE 4490 ms.
+    // The per-layer core hand-off costs more than the parallelism saves here,
+    // so stay on the default single-core path.
     model->run();
     int64_t end_inf = esp_timer_get_time();
 
@@ -59,11 +61,17 @@ void test_inference(dl::Model *model, YOLO26 &processor, const uint8_t *jpg_data
 
     ESP_LOGI(TAG, "Pre: %lu ms | Inf: %lu ms | Post: %lu ms", lat_pre, lat_inf, lat_post);
 
+    // Results arrive sorted by score, so instance ids are stable per image.
+    int instance = 0;
     for (const auto &res : results) {
-        // The processor automatically maps class_id to the string array you passed
+        // The postprocessor only scores class 0 ("person"); keep the bounds
+        // check so a bad class id can never walk off the name table.
+        const char *label = (res.category >= 0 && res.category < coco_classes_count)
+                        ? current_classes[res.category] : "INVALID";
         ESP_LOGI("YOLO26",
-                 "[category: %s, score: %.2f, x1: %d, y1: %d, x2: %d, y2: %d]",
-                 current_classes[res.category],
+                 "[category: %s, instance: %d, score: %.2f, x1: %d, y1: %d, x2: %d, y2: %d]",
+                 label,
+                 ++instance,
                  res.score,
                  res.box[0],
                  res.box[1],
@@ -86,6 +94,17 @@ extern "C" void app_main(void)
                                      dl::MEMORY_MANAGER_GREEDY,
                                      nullptr,
                                      true);
+
+    // --- Diagnostics: dtype of the graph we actually embedded, and where memory landed ---
+    ESP_LOGI(TAG, "Internal free: %u B | PSRAM free: %u B",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    for (auto &kv : model->get_inputs()) {
+        dl::TensorBase *t = kv.second;
+        ESP_LOGI(TAG, "input '%s': dtype=%d exponent=%d shape=[%d,%d,%d,%d]",
+                 kv.first.c_str(), (int)t->dtype, (int)t->exponent,
+                 t->shape[0], t->shape[1], t->shape[2], t->shape[3]);
+    }
 
     // 2. Initialize Processor
     YOLO26 processor(model, YOLO_TARGET_K, YOLO_CONF_THRESH, current_classes);

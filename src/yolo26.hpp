@@ -11,15 +11,23 @@
 #define YOLO_TARGET_K 32
 #define YOLO_CONF_THRESH 0.50f
 
+// Class restriction. The model is a single-class ("person") detector, but its
+// exported head still carries 80 class channels, so every grid cell is also
+// scored against classes the model was never trained on (that is where the
+// stray "bicycle"/"car"/"dog" hits came from). Only this class id is evaluated;
+// set to -1 to scan every channel again.
+#define YOLO_CLASS_FILTER 0
+
 // Default Configuration
 
 class YOLO26 {
 private:
     // --- State (Calculated/Configured) ---
     std::vector<int> grid_sizes; // Calculated in preprocess
-    int num_classes;             // Calculated in postprocess
+    int num_classes = 0;         // Calculated in postprocess
     int target_k;
     float conf_thresh;
+    int class_filter;            // -1 = all classes, otherwise a single class id
 
     // --- Optimization ---
     // Official ESP-DL Image Preprocessor (Handles Resizing, Letterboxing, and SIMD Quantization)
@@ -54,11 +62,13 @@ public:
      * @param k Max detections (Default: 32)
      * @param thresh Confidence threshold (Default: 0.10f)
      * @param classes Class name array (Default: coco_classes)
+     * @param class_id_filter Only this class id is evaluated (Default: YOLO_CLASS_FILTER, -1 = all)
      */
     YOLO26(dl::Model *model,
            int k = YOLO_TARGET_K,
            float thresh = YOLO_CONF_THRESH,
-           const char **classes = coco_classes);
+           const char **classes = coco_classes,
+           int class_id_filter = YOLO_CLASS_FILTER);
 
     ~YOLO26();
 

@@ -26,8 +26,19 @@ COLORS = ["#FF3333", "#3399FF", "#33CC66", "#FF9900", "#CC33FF", "#00CCCC"]
 # ======================================================================================
 RAW_LOG_DATA = """
 I (4384) image:: person.jpg
-I (6708) yolo26_detect: Pre: 42 ms | Inf: 4490 ms | Post: 27 ms
-I (6708) YOLO26: [category: person, score: 0.78, x1: 330, y1: 173, x2: 404, y2: 377]
+I (6692) yolo26_detect: Pre: 42 ms | Inf: 4455 ms | Post: 28 ms
+I (6692) YOLO26: [category: person, score: 0.78, x1: 330, y1: 173,x2: 404, y2: 377]
+I (6692) YOLO26: [category: bicycle, score: 0.68, x1: 188, y1: 306, x2: 387, y2: 410]
+I (6702) image:: person2.jpg
+I (11382) yolo26_detect: Pre: 44 ms | Inf: 4449 ms | Post: 28 ms
+I (11382) YOLO26: [category: person, score: 0.65, x1: 78, y1: 138,x2: 116, y2: 218]
+I (11382) YOLO26: [category: person, score: 0.72, x1: 0, y1: 123, x2: 39, y2: 259]
+I (11392) YOLO26: [category: car, score: 0.52, x1: 140, y1: 182, x2: 205, y2: 215]
+I (11392) YOLO26: [category: person, score: 0.66, x1: 202, y1: 164, x2: 235, y2: 227]
+I (11402) YOLO26: [category: dog, score: 0.51, x1: 51, y1: 214, x2: 132, y2: 255]
+I (11412) YOLO26: [category: person, score: 0.79, x1: 311, y1: 71,x2: 439, y2: 410]
+I (11422) YOLO26: [category: person, score: 0.76, x1: 75, y1: 210,x2: 370, y2: 390]
+
 """
 
 # ======================================================================================

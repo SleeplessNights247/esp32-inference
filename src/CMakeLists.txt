@@ -32,7 +32,6 @@ if ("___idf_espressif__esp-dl" IN_LIST component_targets)
 elseif("___idf_esp-dl" IN_LIST component_targets)
    idf_component_get_property(espdl_dir esp-dl COMPONENT_DIR)
 endif()
-set(cmake_dir ${espdl_dir}/fbs_loader/cmake)
 
 if (IDF_TARGET STREQUAL "esp32s3")
     set(model_file "${CMAKE_CURRENT_SOURCE_DIR}/models/yolo26n_512_s8_s3.espdl")

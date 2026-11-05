@@ -10,8 +10,8 @@
 
 // --- Constructor ---
 
-YOLO26::YOLO26(dl::Model *model, int k, float thresh, const char **classes) :
-    target_k(k), conf_thresh(thresh), class_names(classes)
+YOLO26::YOLO26(dl::Model *model, int k, float thresh, const char **classes, int class_id_filter) :
+    target_k(k), conf_thresh(thresh), class_filter(class_id_filter), class_names(classes)
 {
     // Reserve memory for grids
     grid_sizes.resize(3);
@@ -66,15 +66,22 @@ void YOLO26::decode_grid(dl::TensorBase *p_box,
     float raw_thresh_float = dl::math::inverse_sigmoid(conf_thresh);
     T cls_thresh = (T)std::floor(raw_thresh_float / cls_scale);
 
+    // Single-class model: scan only the requested class channel. Besides
+    // dropping detections of classes the model never learned, this cuts the
+    // per-cell work by num_classes.
+    const int c_begin = (class_filter >= 0) ? class_filter : 0;
+    const int c_end = (class_filter >= 0) ? (class_filter + 1) : num_classes;
+    assert(c_end <= num_classes);
+
     for (int h = 0; h < grid_h; h++) {
         for (int w = 0; w < grid_w; w++) {
             int pixel_idx = (h * grid_w) + w; // NHWC
-            int cls_offset = pixel_idx * num_classes;
+            int cls_offset = pixel_idx * num_classes + c_begin;
 
             float max_score = -1.0f;
             int best_cls_id = -1;
 
-            for (int c = 0; c < num_classes; c++) {
+            for (int c = 0; c < (c_end - c_begin); c++) {
                 T raw_val_T = raw_cls[cls_offset + c];
                 if (raw_val_T <= cls_thresh)
                     continue;
@@ -83,7 +90,7 @@ void YOLO26::decode_grid(dl::TensorBase *p_box,
                 float score = dl::math::sigmoid(raw_val);
                 if (score > max_score) {
                     max_score = score;
-                    best_cls_id = c;
+                    best_cls_id = c_begin + c;
                 }
             }
 
@@ -127,6 +134,17 @@ std::vector<dl::detect::result_t> YOLO26::postprocess(const std::map<std::string
     // Auto-detect the class count
     this->num_classes = p3_cls->shape[3];
 
+    printf("[YOLO26] num_classes=%d dtype=%d shape=[%d,%d,%d,%d] filter=%d\n", num_classes,
+           (int)p3_cls->dtype, p3_cls->shape[0], p3_cls->shape[1], p3_cls->shape[2],
+           p3_cls->shape[3], class_filter);
+
+    if (class_filter >= num_classes) {
+        printf("[YOLO26] class_filter=%d out of range (num_classes=%d), scanning all classes\n",
+               class_filter, num_classes);
+        class_filter = -1;
+    }
+
+
     std::vector<dl::detect::result_t> candidates;
     candidates.reserve(target_k * 2);
 
@@ -148,9 +166,10 @@ std::vector<dl::detect::result_t> YOLO26::postprocess(const std::map<std::string
         }
     }
 
-    // Top-K Extraction (NMS-Free)
-    if (candidates.size() > target_k) {
-        std::nth_element(candidates.begin(), candidates.begin() + target_k, candidates.end(), dl::detect::greater_box);
+    // Rank by confidence so callers get a stable, ordered list (instance ids),
+    // then keep Top-K. The one2one head is already NMS-free.
+    std::sort(candidates.begin(), candidates.end(), dl::detect::greater_box);
+    if ((int)candidates.size() > target_k) {
         candidates.resize(target_k);
     }
 

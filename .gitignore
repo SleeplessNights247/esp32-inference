@@ -1,0 +1,13 @@
+.pio/*
+.vscode/*
+.vscode/*
+.vscode/*
+.vscode/*
+managed_components/*
+.freebuff/*
+build/*
+read_serial.py
+serial_capture.txt
+embedded_images.S
+yolo26n_512_s8_s3_model.S
+src/images/*
